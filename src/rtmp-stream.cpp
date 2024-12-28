@@ -147,75 +147,82 @@ void write_frame(AVCodecContext *codec_ctx, AVFormatContext *fmt_ctx, AVFrame *f
 
 void stream_video(double width, double height, int fps, int camID, int bitrate, std::string codec_profile, std::string server)
 {
-#if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(58, 9, 100)
-  av_register_all();
-#endif
-  avformat_network_init();
+    #if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(58, 9, 100)
+        av_register_all();
+    #endif
+    avformat_network_init();
 
-  const char *output = server.c_str();
-  int ret;
-  auto cam = get_device(camID, width, height);
-  std::vector<uint8_t> imgbuf(height * width * 3 + 16);
-  cv::Mat image(height, width, CV_8UC3, imgbuf.data(), width * 3);
-  AVFormatContext *ofmt_ctx = nullptr;
-  const AVCodec *out_codec = nullptr;
-  AVStream *out_stream = nullptr;
-  AVCodecContext *out_codec_ctx = nullptr;
+    // transmit media data into the target server.
+    const char *output = server.c_str();
+    int ret;
 
-  initialize_avformat_context(ofmt_ctx, "flv");
-  initialize_io_context(ofmt_ctx, output);
+    auto cam = get_device(camID, width, height);
+    std::vector<uint8_t> imgbuf(height * width * 3 + 16);
 
-  out_codec = avcodec_find_encoder(AV_CODEC_ID_H264);
-  out_stream = avformat_new_stream(ofmt_ctx, out_codec);
-  out_codec_ctx = avcodec_alloc_context3(out_codec);
+    cv::Mat image(height, width, CV_8UC3, imgbuf.data(), width * 3);
 
-  set_codec_params(ofmt_ctx, out_codec_ctx, width, height, fps, bitrate);
-  initialize_codec_stream(out_stream, out_codec_ctx, out_codec, codec_profile);
+    AVFormatContext *ofmt_ctx = nullptr;
+    const AVCodec *out_codec = nullptr;
+    AVStream *out_stream = nullptr;
+    AVCodecContext *out_codec_ctx = nullptr;
 
-  out_stream->codecpar->extradata = out_codec_ctx->extradata;
-  out_stream->codecpar->extradata_size = out_codec_ctx->extradata_size;
+    initialize_avformat_context(ofmt_ctx, "flv");
 
-  av_dump_format(ofmt_ctx, 0, output, 1);
+    initialize_io_context(ofmt_ctx, output);
 
-  auto *swsctx = initialize_sample_scaler(out_codec_ctx, width, height);
-  auto *frame = allocate_frame_buffer(out_codec_ctx, width, height);
+    out_codec = avcodec_find_encoder(AV_CODEC_ID_H264);
+    out_stream = avformat_new_stream(ofmt_ctx, out_codec);
+    out_codec_ctx = avcodec_alloc_context3(out_codec);
 
-  int cur_size;
-  uint8_t *cur_ptr;
+    set_codec_params(ofmt_ctx, out_codec_ctx, width, height, fps, bitrate);
+    initialize_codec_stream(out_stream, out_codec_ctx, out_codec, codec_profile);
 
-  ret = avformat_write_header(ofmt_ctx, nullptr);
-  if (ret < 0)
-  {
+    out_stream->codecpar->extradata = out_codec_ctx->extradata;
+    out_stream->codecpar->extradata_size = out_codec_ctx->extradata_size;
+
+    av_dump_format(ofmt_ctx, 0, output, 1);
+
+    auto *swsctx = initialize_sample_scaler(out_codec_ctx, width, height);
+    auto *frame = allocate_frame_buffer(out_codec_ctx, width, height);
+
+    int cur_size;
+    uint8_t *cur_ptr;
+
+    ret = avformat_write_header(ofmt_ctx, nullptr);
+    if (ret < 0)
+    {
     std::cout << "Could not write header!" << std::endl;
     exit(1);
-  }
+    }
 
-  bool end_of_stream = false;
-  do
-  {
-    cam >> image;
-    const int stride[] = {static_cast<int>(image.step[0])};
-    sws_scale(swsctx, &image.data, stride, 0, image.rows, frame->data, frame->linesize);
-    frame->pts += av_rescale_q(1, out_codec_ctx->time_base, out_stream->time_base);
-    write_frame(out_codec_ctx, ofmt_ctx, frame);
-  } while (!end_of_stream);
+    bool end_of_stream = false;
+    do
+    {
+        cam >> image;
+        const int stride[] = {static_cast<int>(image.step[0])};
+        sws_scale(swsctx, &image.data, stride, 0, image.rows, frame->data, frame->linesize);
+        frame->pts += av_rescale_q(1, out_codec_ctx->time_base, out_stream->time_base);
+        write_frame(out_codec_ctx, ofmt_ctx, frame);
+    } while (!end_of_stream);
 
-  av_write_trailer(ofmt_ctx);
+    av_write_trailer(ofmt_ctx);
 
-  av_frame_free(&frame);
-  avcodec_close(out_codec_ctx);
-  avio_close(ofmt_ctx->pb);
-  avformat_free_context(ofmt_ctx);
+    av_frame_free(&frame);
+    avcodec_close(out_codec_ctx);
+    avio_close(ofmt_ctx->pb);
+    avformat_free_context(ofmt_ctx);
 }
 
-int main(int argc, char *argv[])
-{
-  int cameraID = 0, fps = 30, width = 800, height = 600, bitrate = 300000;
-  std::string h264profile = "high444";
-  std::string outputServer = "rtmp://localhost/live/stream";
-  bool dump_log = false;
+int main(int argc, char *argv[]) {
+    std::cout << "Hello, world!" << std::endl;
 
-  auto cli = ((option("-c", "--camera") & value("camera", cameraID)) % "camera ID (default: 0)",
+
+    int cameraID = 0, fps = 30, width = 800, height = 480, bitrate = 300000;
+    std::string h264profile = "high444";
+    std::string outputServer = "rtmp://101.34.83.244/live/llyexin";
+    bool dump_log = false;
+
+    auto cli = ((option("-c", "--camera") & value("camera", cameraID)) % "camera ID (default: 0)",
               (option("-o", "--output") & value("output", outputServer)) % "output RTMP server (default: rtmp://localhost/live/stream)",
               (option("-f", "--fps") & value("fps", fps)) % "frames-per-second (default: 30)",
               (option("-w", "--width") & value("width", width)) % "video width (default: 800)",
@@ -224,18 +231,18 @@ int main(int argc, char *argv[])
               (option("-p", "--profile") & value("profile", h264profile)) % "H264 codec profile (baseline | high | high10 | high422 | high444 | main) (default: high444)",
               (option("-l", "--log") & value("log", dump_log)) % "print debug output (default: false)");
 
-  if (!parse(argc, argv, cli))
-  {
+    if (!parse(argc, argv, cli))
+    {
     std::cout << make_man_page(cli, argv[0]) << std::endl;
     return 1;
-  }
+    }
 
-  if (dump_log)
-  {
+    if (dump_log)
+    {
     av_log_set_level(AV_LOG_DEBUG);
-  }
+    }
 
-  stream_video(width, height, fps, cameraID, bitrate, h264profile, outputServer);
+    stream_video(width, height, fps, cameraID, bitrate, h264profile, outputServer);
 
-  return 0;
+    return 0;
 }
